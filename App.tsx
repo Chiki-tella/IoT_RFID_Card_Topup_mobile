@@ -7,7 +7,7 @@ import { AuthenticationScreen } from './src/screens/AuthenticationScreen';
 import { AppNavigation } from './src/navigation/AppNavigation';
 
 function AppContent() {
-  const { userRole } = useApp();
+  const { userRole, logout } = useApp();
   const [isAuthenticated, setIsAuthenticated] = useState(false);
 
   if (!userRole) {
@@ -18,8 +18,15 @@ function AppContent() {
     return (
       <AuthenticationScreen
         role={userRole}
-        onAuthSuccess={() => setIsAuthenticated(true)}
-        onBack={() => setIsAuthenticated(false)}
+        onAuthSuccess={() => {
+          console.log('Authentication successful, navigating to app');
+          setIsAuthenticated(true);
+        }}
+        onBack={() => {
+          console.log('Going back to role selection');
+          logout();
+          setIsAuthenticated(false);
+        }}
       />
     );
   }

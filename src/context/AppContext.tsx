@@ -2,6 +2,17 @@ import React, { createContext, useContext, useEffect, useRef, useState, useCallb
 import { io, Socket } from 'socket.io-client';
 import { BACKEND_URL } from '../config';
 
+// Token storage
+let authToken: string | null = null;
+
+export function getAuthToken() {
+  return authToken;
+}
+
+export function setAuthToken(token: string | null) {
+  authToken = token;
+}
+
 // Types
 export interface CardData {
     uid: string;
@@ -126,6 +137,24 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const isNewCardRef = useRef(false);
     const graceTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+    // Helper function for fetch with timeout
+    const fetchWithTimeout = async (url: string, options: any = {}, timeoutMs: number = 30000) => {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+        
+        try {
+            const response = await fetch(url, {
+                ...options,
+                signal: controller.signal,
+            });
+            clearTimeout(timeoutId);
+            return response;
+        } catch (error) {
+            clearTimeout(timeoutId);
+            throw error;
+        }
+    };
+
     // Keep refs in sync
     useEffect(() => {
         isNewCardRef.current = state.isNewCard;
@@ -142,33 +171,28 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     // Load products
     const refreshProducts = useCallback(async () => {
         try {
-            const res = await fetch(`${BACKEND_URL}/products`);
+            const token = getAuthToken();
+            const res = await fetchWithTimeout(`${BACKEND_URL}/products`, {
+                headers: {
+                    'Authorization': `Bearer ${token}`
+                }
+            }, 30000);
             if (res.ok) {
                 const data = await res.json();
                 setState(s => ({ ...s, products: data }));
             }
         } catch (err) {
             console.error('Failed to load products:', err);
-            // Fallback products
-            setState(s => ({
-                ...s,
-                products: [
-                    { id: 'coffee', name: 'Coffee', price: 2.5, icon: '☕', category: 'food' },
-                    { id: 'sandwich', name: 'Sandwich', price: 5.0, icon: '🥪', category: 'food' },
-                    { id: 'water', name: 'Water Bottle', price: 1.0, icon: '💧', category: 'food' },
-                    { id: 'brochette', name: 'Brochette', price: 4.0, icon: '串', category: 'rwandan' },
-                    { id: 'isombe', name: 'Isombe', price: 3.5, icon: '🥬', category: 'rwandan' },
-                    { id: 'domain-com', name: '.com Domain', price: 12.0, icon: '🌐', category: 'domains' },
-                    { id: 'domain-io', name: '.io Domain', price: 35.0, icon: '🌐', category: 'domains' },
-                ],
-            }));
         }
     }, []);
 
     // Load stats
     const refreshStats = useCallback(async () => {
         try {
-            const cardsRes = await fetch(`${BACKEND_URL}/cards`);
+            const token = getAuthToken();
+            const cardsRes = await fetchWithTimeout(`${BACKEND_URL}/cards`, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            }, 30000);
             if (cardsRes.ok) {
                 const cards = await cardsRes.json();
                 const netBal = cards.reduce((sum: number, c: any) => sum + c.balance, 0);
@@ -180,7 +204,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                 }));
             }
 
-            const txRes = await fetch(`${BACKEND_URL}/transactions?limit=1000`);
+            const txRes = await fetchWithTimeout(`${BACKEND_URL}/transactions?limit=1000`, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            }, 30000);
             if (txRes.ok) {
                 const transactions = await txRes.json();
                 const today = new Date().toDateString();
@@ -209,12 +235,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     // Load transaction history
     const refreshHistory = useCallback(async () => {
         try {
+            const token = getAuthToken();
             let url = `${BACKEND_URL}/transactions?limit=100`;
             if (state.lastScannedUid) {
                 url = `${BACKEND_URL}/transactions/${state.lastScannedUid}`;
             }
 
-            const res = await fetch(url);
+            const res = await fetchWithTimeout(url, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            }, 30000);
             if (!res.ok) throw new Error('Failed to fetch');
 
             const transactions: Transaction[] = await res.json();
@@ -269,7 +298,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             }
 
             try {
-                const res = await fetch(`${BACKEND_URL}/card/${uid}`);
+                const token = getAuthToken();
+                const res = await fetch(`${BACKEND_URL}/card/${uid}`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
                 if (res.ok) {
                     const cardData: CardData = await res.json();
                     setState(s => ({
@@ -436,15 +468,19 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     // API calls
     const topUp = useCallback(
         async (uid: string, amount: number, holderName?: string, passcode?: string) => {
+            const token = getAuthToken();
             const body: any = { uid, amount };
             if (holderName) body.holderName = holderName;
             if (passcode) body.passcode = passcode;
 
-            const res = await fetch(`${BACKEND_URL}/topup`, {
+            const res = await fetchWithTimeout(`${BACKEND_URL}/topup`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
                 body: JSON.stringify(body),
-            });
+            }, 30000);
 
             const result = await res.json();
             if (result.success) {
@@ -463,14 +499,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
     const checkout = useCallback(
         async (uid: string, total: number, description: string, passcode?: string) => {
+            const token = getAuthToken();
             const body: any = { uid, amount: total, description };
             if (passcode) body.passcode = passcode;
 
-            const res = await fetch(`${BACKEND_URL}/pay`, {
+            const res = await fetchWithTimeout(`${BACKEND_URL}/pay`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
                 body: JSON.stringify(body),
-            });
+            }, 30000);
 
             const result = await res.json();
             if (result.success) {
@@ -488,11 +528,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     );
 
     const setPasscode = useCallback(async (uid: string, passcode: string) => {
-        const res = await fetch(`${BACKEND_URL}/card/${uid}/set-passcode`, {
+        const token = getAuthToken();
+        const res = await fetchWithTimeout(`${BACKEND_URL}/card/${uid}/set-passcode`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
             body: JSON.stringify({ passcode }),
-        });
+        }, 30000);
 
         const result = await res.json();
         if (result.success) {

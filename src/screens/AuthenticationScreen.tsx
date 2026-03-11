@@ -4,18 +4,8 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, borderRadius, spacing, fontSize } from '../theme';
 import { useApp } from '../context/AppContext';
+import { setAuthToken } from '../context/AppContext';
 import { BACKEND_URL } from '../config';
-
-// Simple token storage
-let authToken: string | null = null;
-
-export function getAuthToken() {
-  return authToken;
-}
-
-export function setAuthToken(token: string | null) {
-  authToken = token;
-}
 
 interface AuthenticationScreenProps {
     role: 'admin' | 'user';
@@ -39,31 +29,57 @@ export function AuthenticationScreen({ role, onAuthSuccess, onBack }: Authentica
 
         setLoading(true);
         try {
+            console.log('Attempting login with:', { username, role, backendUrl: BACKEND_URL });
+            
+            // Create abort controller for timeout (30 seconds for cloud database)
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+            
             const response = await fetch(`${BACKEND_URL}/auth/login`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ username, password }),
+                signal: controller.signal,
             });
 
+            clearTimeout(timeoutId);
+            console.log('Response status:', response.status);
             const data = await response.json();
+            console.log('Response data:', data);
 
-            if (data.success && data.user.role === role) {
-                // Store token for API calls
-                setAuthToken(data.token);
-                Alert.alert('Success', `Welcome ${username}!`);
-                setUsername('');
-                setPassword('');
-                onAuthSuccess();
-            } else if (data.success && data.user.role !== role) {
-                Alert.alert('Error', `This account is for ${data.user.role} role, not ${role}`);
+            // Check if login was successful
+            if (response.ok && data.success && data.token) {
+                // Verify role matches
+                if (data.user.role === role) {
+                    // Store token for API calls
+                    setAuthToken(data.token);
+                    console.log('Authentication successful for:', username);
+                    Alert.alert('Success', `Welcome ${username}!`);
+                    setUsername('');
+                    setPassword('');
+                    onAuthSuccess();
+                } else {
+                    // Role mismatch
+                    Alert.alert('Error', `This account is for ${data.user.role} role, not ${role}`);
+                    setPassword('');
+                }
+            } else if (response.ok && data.success) {
+                // Token missing
+                Alert.alert('Error', 'Authentication failed: No token received');
                 setPassword('');
             } else {
-                Alert.alert('Error', data.error || 'Authentication failed');
+                // Login failed
+                const errorMsg = data.error || 'Authentication failed';
+                Alert.alert('Error', errorMsg);
                 setPassword('');
             }
         } catch (error) {
-            Alert.alert('Error', 'Failed to connect to server. Please try again.');
             console.error('Auth error:', error);
+            if (error instanceof Error && error.name === 'AbortError') {
+                Alert.alert('Error', 'Request timeout. Please check your connection and try again.');
+            } else {
+                Alert.alert('Error', 'Failed to connect to server. Please check your connection and try again.');
+            }
         } finally {
             setLoading(false);
         }
@@ -72,6 +88,7 @@ export function AuthenticationScreen({ role, onAuthSuccess, onBack }: Authentica
     const handleBack = () => {
         setUsername('');
         setPassword('');
+        setShowPassword(false);
         logout();
         onBack();
     };
@@ -134,7 +151,9 @@ export function AuthenticationScreen({ role, onAuthSuccess, onBack }: Authentica
                         </TouchableOpacity>
                     </View>
                     <Text style={styles.hint}>
-                        {role === 'admin' ? 'Demo: admin / admin123' : 'Demo: user / user123'}
+                        {role === 'admin' 
+                          ? 'Demo: admin / admin123 or manager / manager123' 
+                          : 'Demo: user / user123 or operator / operator123'}
                     </Text>
                 </View>
 
