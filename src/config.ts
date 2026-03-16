@@ -1,9 +1,10 @@
 // Configuration for different environments
 const config = {
     getBackendUrl: () => {
-        // For development, use your local IP or production URL
-        // Change this to your actual backend URL
-        return 'http://157.173.101.159:8208';
+        // For tablet/physical device testing, use your machine's IP
+        // Your machine IP: 192.168.56.1
+        // Make sure tablet is on the same network
+        return 'http://192.168.56.1:8275';
     },
 };
 

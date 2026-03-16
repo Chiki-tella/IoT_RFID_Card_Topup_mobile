@@ -4,18 +4,8 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, borderRadius, spacing, fontSize } from '../theme';
 import { useApp } from '../context/AppContext';
+import { setAuthToken } from '../context/AppContext';
 import { BACKEND_URL } from '../config';
-
-// Simple token storage
-let authToken: string | null = null;
-
-export function getAuthToken() {
-  return authToken;
-}
-
-export function setAuthToken(token: string | null) {
-  authToken = token;
-}
 
 interface AuthenticationScreenProps {
     role: 'admin' | 'user';
@@ -38,40 +28,101 @@ export function AuthenticationScreen({ role, onAuthSuccess, onBack }: Authentica
         }
 
         setLoading(true);
+        console.log('=== AUTHENTICATION START ===');
+        console.log('Timestamp:', new Date().toISOString());
+        console.log('Backend URL:', BACKEND_URL);
+        console.log('Username:', username);
+        console.log('Role:', role);
+        
         try {
+            console.log('Step 1: Creating abort controller...');
+            
+            // Create abort controller for timeout (60 seconds for cloud database)
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => {
+                console.log('Step 2: Timeout triggered after 60 seconds');
+                controller.abort();
+            }, 60000); // 60 second timeout
+            
+            console.log('Step 2: Sending login request...');
+            const startTime = Date.now();
+            
             const response = await fetch(`${BACKEND_URL}/auth/login`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ username, password }),
+                signal: controller.signal,
             });
 
+            const responseTime = Date.now() - startTime;
+            clearTimeout(timeoutId);
+            
+            console.log(`Step 3: Response received in ${responseTime}ms`);
+            console.log('Response status:', response.status);
+            console.log('Response ok:', response.ok);
+            
             const data = await response.json();
+            console.log('Step 4: Response parsed');
+            console.log('Response data:', { success: data.success, hasToken: !!data.token, hasUser: !!data.user });
 
-            if (data.success && data.user.role === role) {
-                // Store token for API calls
-                setAuthToken(data.token);
-                Alert.alert('Success', `Welcome ${username}!`);
-                setUsername('');
-                setPassword('');
-                onAuthSuccess();
-            } else if (data.success && data.user.role !== role) {
-                Alert.alert('Error', `This account is for ${data.user.role} role, not ${role}`);
+            // Check if login was successful
+            if (response.ok && data.success && data.token) {
+                console.log('Step 5: Login successful, checking role...');
+                console.log('User role from response:', data.user.role);
+                console.log('Expected role:', role);
+                
+                // Verify role matches
+                if (data.user.role === role) {
+                    console.log('Step 6: Role matches, storing token...');
+                    // Store token for API calls
+                    setAuthToken(data.token);
+                    console.log('Step 7: Token stored, showing success alert...');
+                    console.log('=== AUTHENTICATION SUCCESS ===');
+                    Alert.alert('Success', `Welcome ${username}!`);
+                    setUsername('');
+                    setPassword('');
+                    onAuthSuccess();
+                } else {
+                    console.log('Step 6: Role mismatch!');
+                    console.log(`Expected: ${role}, Got: ${data.user.role}`);
+                    Alert.alert('Error', `This account is for ${data.user.role} role, not ${role}`);
+                    setPassword('');
+                }
+            } else if (response.ok && data.success) {
+                console.log('Step 5: Login successful but no token');
+                Alert.alert('Error', 'Authentication failed: No token received');
                 setPassword('');
             } else {
-                Alert.alert('Error', data.error || 'Authentication failed');
+                console.log('Step 5: Login failed');
+                console.log('Error from server:', data.error);
+                const errorMsg = data.error || 'Authentication failed';
+                Alert.alert('Error', errorMsg);
                 setPassword('');
             }
         } catch (error) {
-            Alert.alert('Error', 'Failed to connect to server. Please try again.');
-            console.error('Auth error:', error);
+            console.error('=== AUTHENTICATION ERROR ===');
+            console.error('Error type:', error instanceof Error ? error.constructor.name : typeof error);
+            console.error('Error message:', error instanceof Error ? error.message : String(error));
+            console.error('Full error:', error);
+            
+            if (error instanceof Error && error.name === 'AbortError') {
+                console.error('Error cause: Request timeout (60 seconds exceeded)');
+                Alert.alert('Error', 'Request timeout. Please check your connection and try again.');
+            } else {
+                console.error('Error cause: Network or other error');
+                Alert.alert('Error', 'Failed to connect to server. Please check your connection and try again.');
+            }
         } finally {
+            console.log('Step Final: Setting loading to false');
             setLoading(false);
+            console.log('=== AUTHENTICATION END ===\n');
         }
     };
 
     const handleBack = () => {
         setUsername('');
         setPassword('');
+        setShowPassword(false);
         logout();
         onBack();
     };
@@ -134,7 +185,9 @@ export function AuthenticationScreen({ role, onAuthSuccess, onBack }: Authentica
                         </TouchableOpacity>
                     </View>
                     <Text style={styles.hint}>
-                        {role === 'admin' ? 'Demo: admin / admin123' : 'Demo: user / user123'}
+                        {role === 'admin' 
+                          ? 'Demo: admin / admin123 or manager / manager123' 
+                          : 'Demo: user / user123 or operator / operator123'}
                     </Text>
                 </View>
 
